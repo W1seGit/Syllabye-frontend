@@ -17,9 +17,11 @@ interface Props {
   selectedId: number | null;
   onSelect: (id: number) => void;
   onAddClass?: () => void;
+  onEditClass?: (id: number) => void;
+  onDeleteClass?: (id: number) => void;
 }
 
-export const ClassDropdown: React.FC<Props> = ({ classes, selectedId, onSelect, onAddClass }) => {
+export const ClassHeader: React.FC<Props> = ({ classes, selectedId, onSelect, onAddClass, onEditClass, onDeleteClass }) => {
   const [open, setOpen] = useState(false);
 
   const selectedName = useMemo(() => {
@@ -38,17 +40,46 @@ export const ClassDropdown: React.FC<Props> = ({ classes, selectedId, onSelect, 
 
   return (
     <>
-      <TouchableOpacity style={styles.trigger} onPress={() => setOpen(true)} activeOpacity={0.85}>
-        <Text style={styles.triggerLabel} numberOfLines={1}>
-          {selectedName}
-        </Text>
-        <Feather name="chevron-down" size={20} color={palette.plum} />
-      </TouchableOpacity>
+      <View style={styles.headerContainer}>
+        <TouchableOpacity 
+          style={styles.header} 
+          onPress={() => setOpen(true)} 
+          activeOpacity={0.7}
+        >
+          <Text style={styles.headerText} numberOfLines={1}>
+            {selectedName}
+          </Text>
+          <Feather name="chevron-down" size={24} color={palette.text} style={styles.chevron} />
+        </TouchableOpacity>
+        
+        {selectedId && (onEditClass || onDeleteClass) && (
+          <View style={styles.actions}>
+            {onEditClass && (
+              <TouchableOpacity 
+                style={styles.actionButton} 
+                onPress={() => onEditClass(selectedId)}
+                activeOpacity={0.7}
+              >
+                <Feather name="edit-2" size={20} color={palette.plum} />
+              </TouchableOpacity>
+            )}
+            {onDeleteClass && (
+              <TouchableOpacity 
+                style={styles.actionButton} 
+                onPress={() => onDeleteClass(selectedId)}
+                activeOpacity={0.7}
+              >
+                <Feather name="trash-2" size={20} color={palette.plum} />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+      </View>
 
       <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Choose a class</Text>
+            <Text style={styles.modalTitle}>Switch class</Text>
             <FlatList
               data={classes}
               keyExtractor={(item) => String(item.id)}
@@ -62,6 +93,9 @@ export const ClassDropdown: React.FC<Props> = ({ classes, selectedId, onSelect, 
                     <Text style={[styles.itemText, isSelected && styles.itemTextSelected]}>
                       {item.name}
                     </Text>
+                    {isSelected && (
+                      <Feather name="check" size={18} color={palette.plum} />
+                    )}
                   </TouchableOpacity>
                 );
               }}
@@ -86,23 +120,33 @@ export const ClassDropdown: React.FC<Props> = ({ classes, selectedId, onSelect, 
 };
 
 const styles = StyleSheet.create({
-  trigger: {
+  headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: palette.white,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: palette.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
+    width: '100%',
   },
-  triggerLabel: {
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+  },
+  headerText: {
+    fontSize: 28,
+    fontWeight: '700',
     color: palette.text,
-    fontWeight: '600',
-    flex: 1,
-    marginRight: spacing.sm,
+  },
+  chevron: {
+    marginLeft: spacing.xs,
+  },
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  actionButton: {
+    padding: spacing.xs,
   },
   modalBackdrop: {
     flex: 1,
@@ -123,6 +167,9 @@ const styles = StyleSheet.create({
     color: palette.text,
   },
   item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.sm,
     borderRadius: radius.md,
@@ -133,9 +180,11 @@ const styles = StyleSheet.create({
   itemText: {
     fontSize: 16,
     color: palette.text,
+    flex: 1,
   },
   itemTextSelected: {
     fontWeight: '700',
+    color: palette.plum,
   },
   addButton: {
     flexDirection: 'row',

@@ -24,6 +24,7 @@ export interface ClassSyllabus {
   text?: string | null;
   pdf_path?: string | null;
   images: SyllabusImage[];
+  summary?: string | null;
 }
 
 export interface EventItem {
@@ -36,6 +37,8 @@ export interface EventItem {
   class_name?: string | null;
   status?: string | null;
   priority?: string | null;
+   syllabus_id?: number | null;
+   source?: string | null;
 }
 
 export interface ChatMessageItem {

@@ -51,22 +51,22 @@ export const CuteButton: React.FC<Props> = ({
 
 const styles = StyleSheet.create({
   base: {
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radius.pill,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg + spacing.xs,
+    borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 48,
+    minHeight: 54,
     ...{
       shadowColor: '#A482C4',
-      shadowOpacity: 0.35,
-      shadowOffset: { width: 0, height: 6 },
-      shadowRadius: 10,
-      elevation: 3,
+      shadowOpacity: 0.25,
+      shadowOffset: { width: 0, height: 4 },
+      shadowRadius: 12,
+      elevation: 4,
     },
   },
   ghostBorder: {
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: palette.plum,
     shadowOpacity: 0,
     elevation: 0,
@@ -81,7 +81,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: 0.3,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 });

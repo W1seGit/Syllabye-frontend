@@ -2,14 +2,12 @@ import React, { useEffect, useMemo } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Feather } from '@expo/vector-icons';
 
 import { AppProvider, useAppContext } from './src/context/AppContext';
 import { AuthScreen } from './src/screens/AuthScreen';
-import { OnboardingClassScreen } from './src/screens/OnboardingClassScreen';
-import { OnboardingSyllabusScreen } from './src/screens/OnboardingSyllabusScreen';
 import { SyllabusScreen } from './src/screens/SyllabusScreen';
 import { SylAiScreen } from './src/screens/SylAiScreen';
 import { CalendarScreen } from './src/screens/CalendarScreen';
@@ -64,31 +62,7 @@ const MainTabs = () => (
 );
 
 const AppContent = () => {
-  const {
-    initializing,
-    token,
-    classes,
-    syllabusCache,
-    skipMap,
-    fetchSyllabusForClass,
-  } = useAppContext();
-
-  const defaultClass = useMemo(
-    () => classes.find((cls) => cls.name === 'Default'),
-    [classes],
-  );
-  const starterClassId = classes[0]?.id;
-  const starterSyllabus = starterClassId ? syllabusCache[starterClassId] : undefined;
-  const hasStarterSyllabus =
-    Boolean(starterSyllabus?.text?.trim()) ||
-    Boolean(starterSyllabus?.pdf_path) ||
-    Boolean(starterSyllabus?.images?.length);
-
-  useEffect(() => {
-    if (token && starterClassId && !skipMap[starterClassId]) {
-      fetchSyllabusForClass(starterClassId).catch(() => null);
-    }
-  }, [token, starterClassId, skipMap, fetchSyllabusForClass]);
+  const { initializing, token } = useAppContext();
 
   if (initializing) {
     return (
@@ -102,14 +76,6 @@ const AppContent = () => {
     return <AuthScreen />;
   }
 
-  if (defaultClass) {
-    return <OnboardingClassScreen />;
-  }
-
-  if (starterClassId && !skipMap[starterClassId] && !hasStarterSyllabus) {
-    return <OnboardingSyllabusScreen />;
-  }
-
   return <MainTabs />;
 };
 
@@ -119,7 +85,9 @@ export default function App() {
       <AppProvider>
         <NavigationContainer theme={navTheme}>
           <StatusBar style="dark" />
-          <AppContent />
+          <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+            <AppContent />
+          </SafeAreaView>
         </NavigationContainer>
       </AppProvider>
     </SafeAreaProvider>
@@ -127,6 +95,10 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: palette.cream,
+  },
   splash: {
     flex: 1,
     alignItems: 'center',

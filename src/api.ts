@@ -114,6 +114,13 @@ export async function renameClass(token: string, classId: number, name: string) 
   });
 }
 
+export async function deleteClass(token: string, classId: number) {
+  return apiRequest<void>(`/classes/${classId}`, {
+    method: 'DELETE',
+    token,
+  });
+}
+
 export async function getClassSyllabus(token: string, classId: number) {
   return apiRequest<ClassSyllabus>(`/classes/${classId}/syllabus`, {
     token,
