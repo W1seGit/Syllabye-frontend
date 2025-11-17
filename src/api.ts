@@ -222,11 +222,20 @@ export interface ChatStreamResult {
   conversationUuid: string | null;
 }
 
+export interface ToolEvent {
+  type: 'tool';
+  phase: 'start' | 'end';
+  tool_name: string;
+  args?: unknown;
+  result?: unknown;
+}
+
 interface StreamChatOptions {
   token: string;
   message: string;
   conversationUuid?: string | null;
   onChunk?: (chunk: string) => void;
+  onToolEvent?: (event: ToolEvent) => void;
   signal?: AbortSignal;
 }
 
@@ -301,6 +310,7 @@ export async function streamChatMessageWs({
   message,
   conversationUuid,
   onChunk,
+  onToolEvent,
 }: StreamChatOptions): Promise<ChatStreamResult> {
   const wsBase = API_BASE_URL.replace(/^http/, 'ws');
   const url = `${wsBase}/chat/ws?token=${encodeURIComponent(token)}${
@@ -310,6 +320,8 @@ export async function streamChatMessageWs({
   return new Promise<ChatStreamResult>((resolve, reject) => {
     let full = '';
     let convUuid: string | null = conversationUuid || null;
+
+    const openTools = new Set<string>();
 
     let ws: WebSocket;
     try {
@@ -344,6 +356,15 @@ export async function streamChatMessageWs({
             ws.close();
             return;
           }
+          if (parsed && parsed.type === 'tool' && (parsed.phase === 'start' || parsed.phase === 'end')) {
+            if (parsed.phase === 'start' && typeof parsed.tool_name === 'string') {
+              openTools.add(parsed.tool_name);
+            } else if (parsed.phase === 'end' && typeof parsed.tool_name === 'string') {
+              openTools.delete(parsed.tool_name);
+            }
+            onToolEvent?.(parsed as ToolEvent);
+            return;
+          }
         } catch {
           full += data;
           onChunk?.(data);
@@ -361,6 +382,17 @@ export async function streamChatMessageWs({
     };
 
     ws.onclose = () => {
+      if (openTools.size && onToolEvent) {
+        for (const name of openTools) {
+          onToolEvent({
+            type: 'tool',
+            phase: 'end',
+            tool_name: name,
+            result: 'Done',
+          });
+        }
+        openTools.clear();
+      }
       resolve({
         fullText: full,
         conversationUuid: convUuid,

@@ -18,7 +18,7 @@ import { Feather } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
-import { streamChatMessage, streamChatMessageWs, renameClass, deleteClass } from '../api';
+import { streamChatMessage, streamChatMessageWs, type ToolEvent, renameClass, deleteClass } from '../api';
 import { useAppContext } from '../context/AppContext';
 import { ClassHeader } from '../components/ClassHeader';
 import { CuteButton } from '../components/CuteButton';
@@ -41,6 +41,15 @@ export const SylAiScreen: React.FC = () => {
   const [editingClassId, setEditingClassId] = useState<number | null>(null);
   const [editingClassName, setEditingClassName] = useState('');
   const [savingClass, setSavingClass] = useState(false);
+  const [toolEvents, setToolEvents] = useState<
+    Array<{
+      id: number;
+      toolName: string;
+      phase: 'start' | 'end';
+      args?: unknown;
+      result?: unknown;
+    }>
+  >([]);
   const slideX = useRef(new Animated.Value(0)).current;
   const screenWidth = Dimensions.get('window').width;
   const flatListRef = useRef<FlatList>(null);
@@ -157,6 +166,7 @@ export const SylAiScreen: React.FC = () => {
     setInput('');
     setStreamingText('');
     setIsStreaming(true);
+    setToolEvents([]);
     try {
       let result;
       try {
@@ -166,6 +176,43 @@ export const SylAiScreen: React.FC = () => {
           conversationUuid: conversationId,
           onChunk: (chunk) => {
             setStreamingText((prev) => prev + chunk);
+          },
+          onToolEvent: (evt: ToolEvent) => {
+            setToolEvents((prev) => {
+              const id = prev.length + 1;
+              if (evt.phase === 'start') {
+                return [
+                  ...prev,
+                  {
+                    id,
+                    toolName: evt.tool_name,
+                    phase: 'start',
+                    args: evt.args,
+                  },
+                ];
+              }
+              const existing = prev.find((t) => t.toolName === evt.tool_name && t.phase === 'start');
+              if (existing) {
+                return prev.map((t) =>
+                  t === existing
+                    ? {
+                        ...t,
+                        phase: 'end',
+                        result: evt.result,
+                      }
+                    : t,
+                );
+              }
+              return [
+                ...prev,
+                {
+                  id,
+                  toolName: evt.tool_name,
+                  phase: 'end',
+                  result: evt.result,
+                },
+              ];
+            });
           },
         });
       } catch {
@@ -211,9 +258,49 @@ export const SylAiScreen: React.FC = () => {
     );
   };
 
+  const isThinking = isStreaming && !streamingText;
+
   const data: ChatMessageItem[] = streamingText
     ? [...messages, { role: 'assistant', content: streamingText }]
+    : isThinking
+    ? [...messages, { role: 'assistant', content: '...' }]
     : messages;
+
+  const renderToolSummary = (tool: {
+    toolName: string;
+    phase: 'start' | 'end';
+    result?: unknown;
+  }) => {
+    if (tool.phase === 'start') {
+      return 'Running...';
+    }
+
+    if (tool.toolName === 'list_classes' && typeof tool.result === 'string') {
+      const lines = (tool.result as string)
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+      const items = lines.map((line) => {
+        const match = line.match(/^id=(\d+) \| (.+)$/);
+        if (!match) return null;
+        return `${match[1]} · ${match[2]}`;
+      });
+      const filtered = items.filter((v): v is string => !!v);
+      if (!filtered.length) return tool.result as string;
+      return filtered.join('  •  ');
+    }
+
+    if (typeof tool.result === 'string') {
+      const firstLine = (tool.result as string).split('\n')[0]?.trim();
+      return firstLine || tool.result;
+    }
+
+    try {
+      return JSON.stringify(tool.result);
+    } catch {
+      return String(tool.result ?? 'Done');
+    }
+  };
 
   // Auto-scroll to bottom when new messages arrive
   React.useEffect(() => {
@@ -243,6 +330,32 @@ export const SylAiScreen: React.FC = () => {
         onDeleteClass={handleDeleteClass}
         onOpen={refreshClasses}
       />
+
+      {toolEvents.length > 0 && (
+        <View style={styles.toolsContainer}>
+          {toolEvents.map((tool, index) => (
+            <View
+              key={tool.id}
+              style={[
+                styles.toolRow,
+                index > 0 && styles.toolRowDivider,
+              ]}
+            >
+              <View style={styles.toolIconWrapper}>
+                {tool.phase === 'start' ? (
+                  <Feather name="loader" size={14} color={palette.plum} />
+                ) : (
+                  <Feather name="check-circle" size={14} color={palette.plum} />
+                )}
+              </View>
+              <View style={styles.toolTextWrapper}>
+                <Text style={styles.toolName}>{tool.toolName}</Text>
+                <Text style={styles.toolSummary}>{renderToolSummary(tool)}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
 
       <FlatList
         ref={flatListRef}
@@ -425,5 +538,42 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 6,
     elevation: 2,
+  },
+  toolsContainer: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: palette.white,
+    borderWidth: 1,
+    borderColor: palette.border,
+    gap: spacing.xs,
+  },
+  toolRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+  },
+  toolRowDivider: {
+    borderTopWidth: 1,
+    borderTopColor: palette.border,
+    paddingTop: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  toolIconWrapper: {
+    marginTop: 1,
+  },
+  toolTextWrapper: {
+    flex: 1,
+  },
+  toolName: {
+    fontSize: 11,
+    color: palette.muted,
+    marginBottom: 1,
+  },
+  toolSummary: {
+    fontSize: 12,
+    color: palette.text,
   },
 });
