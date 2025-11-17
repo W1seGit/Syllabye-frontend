@@ -18,7 +18,7 @@ import dayjs from 'dayjs';
 import { useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
-import { createEvent, listEvents, renameClass, deleteClass } from '../api';
+import { createEvent, listEvents, renameClass, deleteClass, updateEvent, deleteEvent } from '../api';
 import type { EventItem } from '../types';
 import { useAppContext } from '../context/AppContext';
 import { ClassHeader } from '../components/ClassHeader';
@@ -37,6 +37,7 @@ interface DayCell {
 }
 
 type CalendarViewMode = 'calendar' | 'list';
+type CalendarDisplayMode = 'month' | 'day';
 
 export const CalendarScreen: React.FC = () => {
   const navigation = useNavigation<MainTabNav>();
@@ -51,16 +52,24 @@ export const CalendarScreen: React.FC = () => {
   const [currentMonth, setCurrentMonth] = useState(() => dayjs().startOf('month'));
   const [selectedDate, setSelectedDate] = useState(() => dayjs().format('YYYY-MM-DD'));
   const [viewMode, setViewMode] = useState<CalendarViewMode>('calendar');
+  const [displayMode, setDisplayMode] = useState<CalendarDisplayMode>('month');
+  const [navigationSource, setNavigationSource] = useState<'month' | 'scroll' | null>(null);
   const [visibleMonths, setVisibleMonths] = useState<dayjs.Dayjs[]>([]);
+  const [visibleDays, setVisibleDays] = useState<string[]>([]);
   const scrollViewRef = useRef<ScrollView>(null);
+  const dayScrollViewRef = useRef<ScrollView>(null);
   const monthHeights = useRef<number[]>([]);
-  const isScrolling = useRef(false);
+  const [calendarViewportHeight, setCalendarViewportHeight] = useState(0);
+  const viewTransition = useRef(new Animated.Value(0)).current;
   const [showModal, setShowModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDate, setNewDate] = useState(() => dayjs().format('YYYY-MM-DD'));
   const [newTime, setNewTime] = useState('09:00');
   const [newDescription, setNewDescription] = useState('');
+  const [newPriority, setNewPriority] = useState('');
+  const [newAssignmentType, setNewAssignmentType] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editingEventId, setEditingEventId] = useState<number | null>(null);
   const slideX = useRef(new Animated.Value(0)).current;
   const screenWidth = Dimensions.get('window').width;
 
@@ -108,11 +117,52 @@ export const CalendarScreen: React.FC = () => {
     }
   };
 
+  // On first render of the month view, scroll so that the current month is
+  // brought into view instead of starting several months in the past.
+  useEffect(() => {
+    if (!scrollViewRef.current) return;
+    if (!visibleMonths.length) return;
+    if (calendarViewportHeight <= 0) return;
+
+    const todayMonth = dayjs().startOf('month');
+    const index = visibleMonths.findIndex((m) => m.isSame(todayMonth, 'month'));
+    if (index <= 0) return;
+
+    // Approximate per-month height using the viewport height. This doesn't
+    // have to be perfect; it's just to land near the current month.
+    const estimatedMonthHeight = calendarViewportHeight || Dimensions.get('window').height * 0.8;
+    const offset = index * estimatedMonthHeight;
+
+    scrollViewRef.current.scrollTo({ y: offset, animated: false });
+  }, [calendarViewportHeight, visibleMonths]);
+
+  // When navigating from month view into day view by tapping a date, scroll the
+  // day list once so that the chosen date is brought into view. After that,
+  // the header follows the scroll position only.
+  useEffect(() => {
+    if (displayMode !== 'day') return;
+    if (navigationSource !== 'month') return;
+    if (!dayScrollViewRef.current) return;
+    if (!visibleDays.length) return;
+
+    const first = dayjs(visibleDays[0]);
+    const target = dayjs(selectedDate);
+    const index = target.diff(first, 'day');
+    if (index < 0 || index >= visibleDays.length) return;
+
+    const estimatedDayHeight = Dimensions.get('window').height * 0.5;
+    const offset = index * estimatedDayHeight;
+
+    dayScrollViewRef.current.scrollTo({ y: offset, animated: false });
+    // Mark that further updates come from scroll, not navigation.
+    setNavigationSource('scroll');
+  }, [displayMode, navigationSource, selectedDate, visibleDays]);
+
   useEffect(() => {
     loadEvents();
   }, [token]);
 
-  // Initialize visible months (6 months before and after current)
+  // Initialize visible months (6 months before and after current - 1 year total)
   useEffect(() => {
     const months: dayjs.Dayjs[] = [];
     for (let i = -6; i <= 6; i++) {
@@ -121,9 +171,29 @@ export const CalendarScreen: React.FC = () => {
     setVisibleMonths(months);
   }, []);
 
+  // Initialize a fixed range of visible days (6 months before today and 6 after)
+  useEffect(() => {
+    const days: string[] = [];
+    const start = dayjs().startOf('day').subtract(180, 'day');
+    for (let i = 0; i <= 360; i++) {
+      days.push(start.add(i, 'day').format('YYYY-MM-DD'));
+    }
+    setVisibleDays(days);
+  }, []);
+
+  const selectedClassName = useMemo(() => {
+    const cls = classes.find((c) => c.id === selectedClassId);
+    return cls?.name || null;
+  }, [classes, selectedClassId]);
+
+  const classFilteredEvents = useMemo(() => {
+    if (!selectedClassName) return events;
+    return events.filter((event) => event.class_name === selectedClassName);
+  }, [events, selectedClassName]);
+
   const eventsByDate = useMemo(() => {
     const map: Record<string, EventItem[]> = {};
-    events.forEach((event) => {
+    classFilteredEvents.forEach((event) => {
       const key = dayjs(event.due).format('YYYY-MM-DD');
       if (!map[key]) {
         map[key] = [];
@@ -131,7 +201,21 @@ export const CalendarScreen: React.FC = () => {
       map[key].push(event);
     });
     return map;
-  }, [events]);
+  }, [classFilteredEvents]);
+
+  const getPriorityColors = (priority?: string | null) => {
+    const normalized = (priority || '').toLowerCase();
+    if (normalized === 'high') {
+      return { backgroundColor: palette.coral, textColor: palette.white };
+    }
+    if (normalized === 'medium') {
+      return { backgroundColor: palette.gold, textColor: palette.text };
+    }
+    if (normalized === 'low') {
+      return { backgroundColor: palette.mint, textColor: palette.text };
+    }
+    return { backgroundColor: palette.sky, textColor: palette.text };
+  };
 
   const getMonthDays = (month: dayjs.Dayjs): DayCell[] => {
     const start = month.startOf('month');
@@ -160,70 +244,132 @@ export const CalendarScreen: React.FC = () => {
   };
 
   const handleScroll = (event: any) => {
-    if (isScrolling.current) return;
-    
     const scrollY = event.nativeEvent.contentOffset.y;
+    const viewportCenterY = scrollY + calendarViewportHeight / 2;
     let accumulatedHeight = 0;
     
     for (let i = 0; i < visibleMonths.length; i++) {
       const monthHeight = monthHeights.current[i] || 0;
-      if (scrollY >= accumulatedHeight && scrollY < accumulatedHeight + monthHeight / 2) {
+      const monthStart = accumulatedHeight;
+      const monthEnd = accumulatedHeight + monthHeight;
+
+      // Use viewport center to decide which month is "active" so the header
+      // switches when the next month is about half visible.
+      const isCenterInThisMonth =
+        calendarViewportHeight > 0
+          ? viewportCenterY >= monthStart && viewportCenterY < monthEnd
+          : scrollY >= monthStart && scrollY < monthEnd;
+
+      if (isCenterInThisMonth) {
         const newMonth = visibleMonths[i];
+
+        // Keep header in sync with the month that is currently near the top
         if (!newMonth.isSame(currentMonth, 'month')) {
           setCurrentMonth(newMonth);
         }
+
         break;
       }
       accumulatedHeight += monthHeight;
     }
   };
 
-  const loadMoreMonths = (direction: 'top' | 'bottom') => {
-    setVisibleMonths((prev) => {
-      if (direction === 'top') {
-        const firstMonth = prev[0];
-        const newMonths = [];
-        for (let i = 3; i > 0; i--) {
-          newMonths.push(firstMonth.subtract(i, 'month'));
-        }
-        return [...newMonths, ...prev];
-      } else {
-        const lastMonth = prev[prev.length - 1];
-        const newMonths = [];
-        for (let i = 1; i <= 3; i++) {
-          newMonths.push(lastMonth.add(i, 'month'));
-        }
-        return [...prev, ...newMonths];
-      }
-    });
-  };
+  // In day view, keep the header in sync with the calendar position instead of
+  // forcing the calendar to jump to the header date.
+  const handleDayScroll = (event: any) => {
+    if (displayMode !== 'day') return;
+    if (!visibleDays.length) return;
 
-  const handleScrollBeginDrag = () => {
-    isScrolling.current = true;
-  };
-
-  const handleScrollEndDrag = () => {
-    isScrolling.current = false;
-  };
-
-  const handleMomentumScrollEnd = (event: any) => {
     const scrollY = event.nativeEvent.contentOffset.y;
-    const contentHeight = event.nativeEvent.contentSize.height;
-    const layoutHeight = event.nativeEvent.layoutMeasurement.height;
+    const estimatedDayHeight = Dimensions.get('window').height * 0.5;
+    if (estimatedDayHeight <= 0) return;
 
-    // Load more months when near the edges
-    if (scrollY < 500) {
-      loadMoreMonths('top');
-    } else if (scrollY > contentHeight - layoutHeight - 500) {
-      loadMoreMonths('bottom');
+    // Use the center of the viewport to decide which day is "active".
+    const viewportCenterY = scrollY + estimatedDayHeight / 2;
+    let index = Math.floor(viewportCenterY / estimatedDayHeight);
+
+    if (index < 0) index = 0;
+    if (index >= visibleDays.length) index = visibleDays.length - 1;
+
+    const newDate = visibleDays[index];
+    if (newDate && newDate !== selectedDate) {
+      setNavigationSource('scroll');
+      setSelectedDate(newDate);
     }
   };
 
+
   const sortedEvents = useMemo(
     () =>
-      [...events].sort((a, b) => dayjs(a.due).valueOf() - dayjs(b.due).valueOf()),
-    [events],
+      [...classFilteredEvents].sort((a, b) => dayjs(a.due).valueOf() - dayjs(b.due).valueOf()),
+    [classFilteredEvents],
   );
+
+  const [taskFilter, setTaskFilter] = useState<'all' | 'pending' | 'completed'>('all');
+
+  const filteredTodoEvents = useMemo(() => {
+    return sortedEvents.filter((event) => {
+      const status = (event.status || '').toLowerCase();
+      if (taskFilter === 'completed') {
+        return status === 'completed';
+      }
+      if (taskFilter === 'pending') {
+        return status !== 'completed';
+      }
+      return true;
+    });
+  }, [sortedEvents, taskFilter]);
+
+  const renderTaskCard = (event: EventItem) => {
+    const dateTimeLabel = dayjs(event.due).format('MMM D • h:mm A');
+    const metaParts: string[] = [];
+    if (event.priority) metaParts.push(event.priority);
+    if (event.assignment_type) metaParts.push(event.assignment_type);
+    const metaLabel = metaParts.join(' • ');
+    const colors = getPriorityColors(event.priority);
+
+    return (
+      <View key={event.id} style={[styles.todoCard, { backgroundColor: colors.backgroundColor }]}>
+        <Text style={[styles.todoDateTime, { color: colors.textColor }]}>{dateTimeLabel}</Text>
+        <View style={styles.todoTitleRow}>
+          <TouchableOpacity
+            onPress={() => handleToggleEventStatus(event)}
+            style={styles.checkbox}
+          >
+            <Feather
+              name={
+                (event.status || '').toLowerCase() === 'completed'
+                  ? 'check-square'
+                  : 'square'
+              }
+              size={18}
+              color={colors.textColor}
+            />
+          </TouchableOpacity>
+          <Text style={[styles.todoTitle, { color: colors.textColor }]}>{event.title}</Text>
+          <View style={styles.todoActions}>
+            <TouchableOpacity onPress={() => handleEditEvent(event)}>
+              <Feather name="edit-2" size={16} color={colors.textColor} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => handleDeleteEvent(event.id)}>
+              <Feather name="trash-2" size={16} color={colors.textColor} />
+            </TouchableOpacity>
+          </View>
+        </View>
+        {event.class_name ? (
+          <Text style={[styles.todoClass, { color: colors.textColor }]}>{event.class_name}</Text>
+        ) : null}
+        {event.description ? (
+          <Text style={[styles.todoDescription, { color: colors.textColor }]}>
+            {event.description}
+          </Text>
+        ) : null}
+        {metaLabel ? (
+          <Text style={[styles.todoMeta, { color: colors.textColor }]}>{metaLabel}</Text>
+        ) : null}
+      </View>
+    );
+  };
 
   const openModal = (date?: string) => {
     const targetDate = date || selectedDate || currentMonth.format('YYYY-MM-DD');
@@ -231,8 +377,12 @@ export const CalendarScreen: React.FC = () => {
     setNewDescription('');
     setNewTime('09:00');
     setNewDate(targetDate);
+    setNewPriority('');
+    setNewAssignmentType('');
+    setEditingEventId(null);
     setShowModal(true);
   };
+
 
   const handleSaveEvent = async () => {
     if (!token || !newTitle.trim() || !newDate || !newTime) {
@@ -247,13 +397,21 @@ export const CalendarScreen: React.FC = () => {
     try {
       setSaving(true);
       const className = classes.find((cls) => cls.id === selectedClassId)?.name;
-      await createEvent(token, {
+      const payload = {
         title: newTitle.trim(),
         due: due.toISOString(),
         description: newDescription.trim() || undefined,
         class_name: className,
-      });
+        priority: newPriority.trim() || undefined,
+        assignment_type: newAssignmentType.trim() || undefined,
+      };
+      if (editingEventId) {
+        await updateEvent(token, editingEventId, payload);
+      } else {
+        await createEvent(token, payload);
+      }
       setShowModal(false);
+      setEditingEventId(null);
       await loadEvents();
     } catch (error) {
       Alert.alert('Could not create event', (error as Error).message);
@@ -264,10 +422,60 @@ export const CalendarScreen: React.FC = () => {
 
 
   const handleSelectDay = (date: string) => {
+    setNavigationSource('month');
     setSelectedDate(date);
-    // Navigate to a detailed day view (you can implement this later)
-    // For now, just open the modal to add an event
-    openModal(date);
+    // Animate to day view
+    setDisplayMode('day');
+    Animated.spring(viewTransition, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 50,
+      friction: 8,
+    }).start();
+  };
+
+  const handleToggleEventStatus = async (event: EventItem) => {
+    if (!token) return;
+    const current = (event.status || '').toLowerCase() === 'completed';
+    const nextStatus = current ? 'pending' : 'completed';
+    try {
+      await updateEvent(token, event.id, { status: nextStatus });
+      await loadEvents();
+    } catch (error) {
+      Alert.alert('Unable to update task', (error as Error).message);
+    }
+  };
+
+  const handleDeleteEvent = async (eventId: number) => {
+    if (!token) return;
+    try {
+      await deleteEvent(token, eventId);
+      await loadEvents();
+    } catch (error) {
+      Alert.alert('Unable to delete task', (error as Error).message);
+    }
+  };
+
+  const handleEditEvent = (event: EventItem) => {
+    setEditingEventId(event.id);
+    setNewTitle(event.title);
+    setNewDescription(event.description || '');
+    setNewTime(dayjs(event.due).format('HH:mm'));
+    setNewDate(dayjs(event.due).format('YYYY-MM-DD'));
+    setNewPriority(event.priority || '');
+    setNewAssignmentType(event.assignment_type || '');
+    setShowModal(true);
+  };
+
+  const handleBackToMonth = () => {
+    Animated.spring(viewTransition, {
+      toValue: 0,
+      useNativeDriver: true,
+      tension: 50,
+      friction: 8,
+    }).start(() => {
+      setDisplayMode('month');
+    });
   };
 
   const handleEditClass = (classId: number) => {
@@ -365,34 +573,55 @@ export const CalendarScreen: React.FC = () => {
 
       {viewMode === 'calendar' ? (
         <>
-          <View style={styles.header}>
-            <View style={styles.monthInfo}>
-              <Text style={styles.monthLabel}>{currentMonth.format('MMMM YYYY')}</Text>
-              <Text style={styles.monthHint}>Scroll to browse months.</Text>
+          {displayMode === 'month' ? (
+            <View style={styles.header}>
+              <View style={styles.monthInfo}>
+                <Text style={styles.monthLabel}>{currentMonth.format('MMMM YYYY')}</Text>
+                <Text style={styles.monthHint}>Scroll to browse months.</Text>
+              </View>
+              <TouchableOpacity style={styles.addButton} onPress={() => openModal()}>
+                <Feather name="plus" size={20} color={palette.white} />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.addButton} onPress={() => openModal()}>
-              <Feather name="plus" size={20} color={palette.white} />
-            </TouchableOpacity>
-          </View>
+          ) : (
+            <View>
+              <TouchableOpacity style={styles.backButton} onPress={handleBackToMonth}>
+                <Feather name="chevron-left" size={20} color={palette.plum} />
+                <Text style={styles.backText}>Back to Month</Text>
+              </TouchableOpacity>
+              <View style={styles.header}>
+                <View style={styles.monthInfo}>
+                  <Text style={styles.monthLabel}>{dayjs(selectedDate).format('MMMM D, YYYY')}</Text>
+                  <Text style={styles.monthHint}>{dayjs(selectedDate).format('dddd')}</Text>
+                </View>
+                <TouchableOpacity style={styles.addButton} onPress={() => openModal(selectedDate)}>
+                  <Feather name="plus" size={20} color={palette.white} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
-          <View style={styles.weekRow}>
-            {weekDays.map((day) => (
-              <Text key={day} style={styles.weekLabel}>
-                {day}
-              </Text>
-            ))}
-          </View>
+          {displayMode === 'month' && (
+            <View style={styles.weekRow}>
+              {weekDays.map((day) => (
+                <Text key={day} style={styles.weekLabel}>
+                  {day}
+                </Text>
+              ))}
+            </View>
+          )}
 
-          <ScrollView
-            ref={scrollViewRef}
-            style={styles.calendarScrollView}
-            showsVerticalScrollIndicator={false}
-            onScroll={handleScroll}
-            onScrollBeginDrag={handleScrollBeginDrag}
-            onScrollEndDrag={handleScrollEndDrag}
-            onMomentumScrollEnd={handleMomentumScrollEnd}
-            scrollEventThrottle={16}
-          >
+          {displayMode === 'month' ? (
+            <ScrollView
+              ref={scrollViewRef}
+              style={styles.calendarScrollView}
+              showsVerticalScrollIndicator={false}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              onLayout={(event) => {
+                setCalendarViewportHeight(event.nativeEvent.layout.height);
+              }}
+            >
             {visibleMonths.map((month, monthIndex) => {
               const monthDays = getMonthDays(month);
               const weeks: DayCell[][] = [];
@@ -452,13 +681,22 @@ export const CalendarScreen: React.FC = () => {
                                 >
                                   {cell.date.date()}
                                 </Text>
-                                {dayEvents.slice(0, 3).map((event) => (
-                                  <View key={event.id} style={styles.eventPreview}>
-                                    <Text style={styles.eventPreviewText} numberOfLines={1}>
-                                      {event.title}
-                                    </Text>
-                                  </View>
-                                ))}
+                                {dayEvents.slice(0, 3).map((event) => {
+                                  const colors = getPriorityColors(event.priority);
+                                  return (
+                                    <View
+                                      key={event.id}
+                                      style={[styles.eventPreview, { backgroundColor: colors.backgroundColor }]}
+                                    >
+                                      <Text
+                                        style={[styles.eventPreviewText, { color: colors.textColor }]}
+                                        numberOfLines={1}
+                                      >
+                                        {event.title}
+                                      </Text>
+                                    </View>
+                                  );
+                                })}
                               </TouchableOpacity>
                             );
                           })}
@@ -470,43 +708,109 @@ export const CalendarScreen: React.FC = () => {
                 </View>
               );
             })}
-          </ScrollView>
+            </ScrollView>
+          ) : (
+            <ScrollView
+              ref={dayScrollViewRef}
+              style={styles.dayScrollView}
+              showsVerticalScrollIndicator={false}
+              onScroll={handleDayScroll}
+              scrollEventThrottle={16}
+            >
+              {visibleDays.map((date) => {
+                const dayEvents = eventsByDate[date] || [];
+                const sortedDayEvents = [...dayEvents].sort((a, b) => 
+                  dayjs(a.due).valueOf() - dayjs(b.due).valueOf()
+                );
+                
+                return (
+                  <View
+                    key={date}
+                    style={styles.dayContainer}
+                  >
+                    <Text style={styles.daySectionLabel}>
+                      {dayjs(date).format('dddd, MMMM D')}
+                    </Text>
+                    <View style={styles.dayEventsContainer}>
+                      {sortedDayEvents.length === 0 ? (
+                        <View style={styles.emptyDayCard}>
+                          <Feather name="calendar" size={64} color={palette.muted} />
+                          <Text style={styles.emptyDayText}>No events</Text>
+                          <Text style={styles.emptyDayHint}>Tap + to add one</Text>
+                        </View>
+                      ) : (
+                        sortedDayEvents.map((event) => renderTaskCard(event))
+                      )}
+                    </View>
+                    <View style={styles.daySeparator} />
+                  </View>
+                );
+              })}
+            </ScrollView>
+          )}
         </>
       ) : (
         <View style={styles.listWrapper}>
           <View style={styles.listHeader}>
-            <View>
-              <Text style={styles.eventsTitle}>To-do</Text>
-              <Text style={styles.eventsSubtitle}>All upcoming tasks in one cozy list.</Text>
+            <View style={styles.filterRow}>
+              <TouchableOpacity
+                style={[
+                  styles.filterChip,
+                  taskFilter === 'all' && styles.filterChipActive,
+                ]}
+                onPress={() => setTaskFilter('all')}
+              >
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    taskFilter === 'all' && styles.filterChipTextActive,
+                  ]}
+                >
+                  All
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.filterChip,
+                  taskFilter === 'pending' && styles.filterChipActive,
+                ]}
+                onPress={() => setTaskFilter('pending')}
+              >
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    taskFilter === 'pending' && styles.filterChipTextActive,
+                  ]}
+                >
+                  Pending
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.filterChip,
+                  taskFilter === 'completed' && styles.filterChipActive,
+                ]}
+                onPress={() => setTaskFilter('completed')}
+              >
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    taskFilter === 'completed' && styles.filterChipTextActive,
+                  ]}
+                >
+                  Completed
+                </Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity onPress={() => openModal()}>
-              <Feather name="plus-circle" size={26} color={palette.plum} />
+            <TouchableOpacity style={styles.addButton} onPress={() => openModal()}>
+              <Feather name="plus" size={20} color={palette.white} />
             </TouchableOpacity>
           </View>
           <ScrollView contentContainerStyle={styles.todoList}>
-            {sortedEvents.length === 0 ? (
+            {filteredTodoEvents.length === 0 ? (
               <Text style={styles.empty}>Nothing scheduled. Syl is chilling.</Text>
             ) : (
-              sortedEvents.map((event) => {
-                const dayLabel = dayjs(event.due).format('MMM D');
-                return (
-                  <View key={event.id} style={styles.todoCard}>
-                    <View style={styles.todoDate}>
-                      <Text style={styles.todoDay}>{dayLabel}</Text>
-                      <Text style={styles.todoTime}>{dayjs(event.due).format('h:mm A')}</Text>
-                    </View>
-                    <View style={styles.todoDetails}>
-                      <Text style={styles.eventTitle}>{event.title}</Text>
-                      {event.class_name ? (
-                        <Text style={styles.eventClass}>{event.class_name}</Text>
-                      ) : null}
-                      {event.description ? (
-                        <Text style={styles.eventDescription}>{event.description}</Text>
-                      ) : null}
-                    </View>
-                  </View>
-                );
-              })
+              filteredTodoEvents.map((event) => renderTaskCard(event))
             )}
           </ScrollView>
         </View>
@@ -539,6 +843,18 @@ export const CalendarScreen: React.FC = () => {
                 value={newTime}
                 onChangeText={setNewTime}
                 placeholder="09:00"
+              />
+              <CuteTextField
+                label="Priority (high, medium, low)"
+                value={newPriority}
+                onChangeText={setNewPriority}
+                placeholder="high / medium / low"
+              />
+              <CuteTextField
+                label="Assignment type"
+                value={newAssignmentType}
+                onChangeText={setNewAssignmentType}
+                placeholder="Homework, exam, project..."
               />
               <CuteTextField
                 label="Notes"
@@ -614,6 +930,17 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
     borderRadius: radius.lg,
   },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+  },
+  backText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: palette.plum,
+  },
   weekRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -684,11 +1011,6 @@ const styles = StyleSheet.create({
     color: palette.white,
     fontWeight: '600',
   },
-  eventsTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: palette.text,
-  },
   eventsSubtitle: {
     color: palette.muted,
   },
@@ -716,11 +1038,8 @@ const styles = StyleSheet.create({
   },
   listWrapper: {
     flex: 1,
-    backgroundColor: palette.white,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: palette.border,
+    backgroundColor: palette.cream,
+    paddingHorizontal: 0,
   },
   listHeader: {
     flexDirection: 'row',
@@ -728,32 +1047,74 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.md,
   },
+  filterRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    alignItems: 'center',
+  },
+  filterChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: palette.border,
+    backgroundColor: palette.white,
+  },
+  filterChipActive: {
+    backgroundColor: palette.plum,
+    borderColor: palette.plum,
+  },
+  filterChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: palette.muted,
+  },
+  filterChipTextActive: {
+    color: palette.white,
+  },
   todoList: {
     gap: spacing.md,
     paddingBottom: spacing.xl,
   },
   todoCard: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    backgroundColor: palette.sky,
+    gap: spacing.xs,
     borderRadius: radius.md,
     padding: spacing.md,
   },
-  todoDate: {
-    width: 80,
-    alignItems: 'flex-start',
+  todoTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
-  todoDay: {
+  checkbox: {
+    paddingRight: spacing.xs,
+  },
+  todoDateTime: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: palette.plum,
+  },
+  todoTitle: {
     fontSize: 16,
     fontWeight: '700',
     color: palette.text,
   },
-  todoTime: {
-    color: palette.plum,
+  todoActions: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    marginLeft: 'auto',
   },
-  todoDetails: {
-    flex: 1,
-    gap: spacing.xs / 2,
+  todoClass: {
+    fontSize: 13,
+    color: palette.muted,
+  },
+  todoDescription: {
+    fontSize: 13,
+    color: palette.text,
+  },
+  todoMeta: {
+    fontSize: 12,
+    color: palette.muted,
   },
   modalBackdrop: {
     flex: 1,
@@ -771,5 +1132,85 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: palette.text,
+  },
+  dayScrollView: {
+    flex: 1,
+    backgroundColor: palette.white,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  dayContainer: {
+    paddingTop: spacing.sm,
+    minHeight: Dimensions.get('window').height * 0.5,
+  },
+  daySectionLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: palette.text,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  dayEventsContainer: {
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+    flex: 1,
+  },
+  emptyDayCard: {
+    flex: 1,
+    paddingVertical: spacing.xl * 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+  },
+  emptyDayText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: palette.text,
+  },
+  emptyDayHint: {
+    fontSize: 14,
+    color: palette.muted,
+  },
+  dayEventCard: {
+    backgroundColor: palette.sky,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderLeftWidth: 4,
+    borderLeftColor: palette.coral,
+    gap: spacing.xs,
+  },
+  dayEventHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  dayEventTime: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: palette.plum,
+    minWidth: 70,
+  },
+  dayEventTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: palette.text,
+    flex: 1,
+  },
+  dayEventClass: {
+    fontSize: 13,
+    color: palette.muted,
+    paddingLeft: 86,
+  },
+  dayEventDescription: {
+    fontSize: 13,
+    color: palette.text,
+    paddingLeft: 86,
+  },
+  daySeparator: {
+    height: 1,
+    backgroundColor: palette.border,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
   },
 });
