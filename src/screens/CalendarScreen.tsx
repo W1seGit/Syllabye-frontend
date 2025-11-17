@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActionSheetIOS,
   Alert,
   Animated,
   Dimensions,
   Easing,
   Modal,
   PanResponder,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -308,7 +310,7 @@ export const CalendarScreen: React.FC = () => {
   const [taskFilter, setTaskFilter] = useState<'all' | 'pending' | 'completed'>('all');
 
   const filteredTodoEvents = useMemo(() => {
-    return sortedEvents.filter((event) => {
+    const filtered = sortedEvents.filter((event) => {
       const status = (event.status || '').toLowerCase();
       if (taskFilter === 'completed') {
         return status === 'completed';
@@ -317,6 +319,17 @@ export const CalendarScreen: React.FC = () => {
         return status !== 'completed';
       }
       return true;
+    });
+
+    return filtered.sort((a, b) => {
+      const aCompleted = (a.status || '').toLowerCase() === 'completed';
+      const bCompleted = (b.status || '').toLowerCase() === 'completed';
+
+      if (aCompleted !== bCompleted) {
+        return aCompleted ? 1 : -1;
+      }
+
+      return dayjs(a.due).valueOf() - dayjs(b.due).valueOf();
     });
   }, [sortedEvents, taskFilter]);
 
@@ -330,6 +343,15 @@ export const CalendarScreen: React.FC = () => {
 
     return (
       <View key={event.id} style={[styles.todoCard, { backgroundColor: colors.backgroundColor }]}>
+        <TouchableOpacity 
+          onPress={() => handleTaskMenu(event)}
+          style={styles.todoActions}
+          activeOpacity={0.6}
+        >
+          <View style={styles.actionButton}>
+            <Feather name="more-vertical" size={20} color={colors.textColor} />
+          </View>
+        </TouchableOpacity>
         <Text style={[styles.todoDateTime, { color: colors.textColor }]}>{dateTimeLabel}</Text>
         <View style={styles.todoTitleRow}>
           <TouchableOpacity
@@ -347,14 +369,6 @@ export const CalendarScreen: React.FC = () => {
             />
           </TouchableOpacity>
           <Text style={[styles.todoTitle, { color: colors.textColor }]}>{event.title}</Text>
-          <View style={styles.todoActions}>
-            <TouchableOpacity onPress={() => handleEditEvent(event)}>
-              <Feather name="edit-2" size={16} color={colors.textColor} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => handleDeleteEvent(event.id)}>
-              <Feather name="trash-2" size={16} color={colors.textColor} />
-            </TouchableOpacity>
-          </View>
         </View>
         {event.class_name ? (
           <Text style={[styles.todoClass, { color: colors.textColor }]}>{event.class_name}</Text>
@@ -456,6 +470,35 @@ export const CalendarScreen: React.FC = () => {
     }
   };
 
+  const handleTaskMenu = (event: EventItem) => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', 'Edit', 'Delete'],
+          destructiveButtonIndex: 2,
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) {
+            handleEditEvent(event);
+          } else if (buttonIndex === 2) {
+            handleDeleteEvent(event.id);
+          }
+        },
+      );
+    } else {
+      Alert.alert(
+        event.title,
+        'Choose an action',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Edit', onPress: () => handleEditEvent(event) },
+          { text: 'Delete', onPress: () => handleDeleteEvent(event.id), style: 'destructive' },
+        ],
+      );
+    }
+  };
+
   const handleEditEvent = (event: EventItem) => {
     setEditingEventId(event.id);
     setNewTitle(event.title);
@@ -474,6 +517,23 @@ export const CalendarScreen: React.FC = () => {
       tension: 50,
       friction: 8,
     }).start(() => {
+      const today = dayjs().startOf('day');
+      const todayMonth = today.startOf('month');
+
+      setSelectedDate(today.format('YYYY-MM-DD'));
+      setCurrentMonth(todayMonth);
+
+      if (scrollViewRef.current && visibleMonths.length) {
+        const index = visibleMonths.findIndex((m) => m.isSame(todayMonth, 'month'));
+        if (index >= 0) {
+          let offset = 0;
+          for (let i = 0; i < index; i++) {
+            offset += monthHeights.current[i] || 0;
+          }
+          scrollViewRef.current.scrollTo({ y: offset, animated: false });
+        }
+      }
+
       setDisplayMode('month');
     });
   };
@@ -549,6 +609,10 @@ export const CalendarScreen: React.FC = () => {
         onAddClass={() => setShowNewClassModal(true)}
         onEditClass={handleEditClass}
         onDeleteClass={handleDeleteClass}
+        onOpen={() => {
+          refreshClasses();
+          loadEvents();
+        }}
       />
       <View style={styles.tabSwitcher}>
         <Text
@@ -1077,9 +1141,11 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
   },
   todoCard: {
+    position: 'relative',
     gap: spacing.xs,
     borderRadius: radius.md,
     padding: spacing.md,
+    paddingRight: spacing.xl * 1.5,
   },
   todoTitleRow: {
     flexDirection: 'row',
@@ -1100,9 +1166,18 @@ const styles = StyleSheet.create({
     color: palette.text,
   },
   todoActions: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    marginLeft: 'auto',
+    position: 'absolute',
+    top: spacing.xs,
+    right: spacing.xs,
+  },
+  actionButton: {
+    padding: spacing.xs,
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 32,
+    height: 32,
   },
   todoClass: {
     fontSize: 13,

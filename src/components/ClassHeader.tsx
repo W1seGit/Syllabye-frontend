@@ -19,10 +19,16 @@ interface Props {
   onAddClass?: () => void;
   onEditClass?: (id: number) => void;
   onDeleteClass?: (id: number) => void;
+  onOpen?: () => void;
 }
 
-export const ClassHeader: React.FC<Props> = ({ classes, selectedId, onSelect, onAddClass, onEditClass, onDeleteClass }) => {
+export const ClassHeader: React.FC<Props> = ({ classes, selectedId, onSelect, onAddClass, onEditClass, onDeleteClass, onOpen }) => {
   const [open, setOpen] = useState(false);
+
+  const handleOpen = () => {
+    setOpen(true);
+    onOpen?.();
+  };
 
   const selectedName = useMemo(() => {
     return classes.find((cls) => cls.id === selectedId)?.name || 'Choose class';
@@ -43,7 +49,7 @@ export const ClassHeader: React.FC<Props> = ({ classes, selectedId, onSelect, on
       <View style={styles.headerContainer}>
         <TouchableOpacity 
           style={styles.header} 
-          onPress={() => setOpen(true)} 
+          onPress={handleOpen} 
           activeOpacity={0.7}
         >
           <Text style={styles.headerText} numberOfLines={1}>

@@ -556,6 +556,7 @@ export const SyllabusScreen: React.FC = () => {
           onAddClass={() => setShowNewClassModal(true)}
           onEditClass={handleEditClass}
           onDeleteClass={handleDeleteClass}
+          onOpen={refreshClasses}
         />
 
         {currentClass && !hasSyllabusContent ? (

@@ -43,6 +43,7 @@ export const SylAiScreen: React.FC = () => {
   const [savingClass, setSavingClass] = useState(false);
   const slideX = useRef(new Animated.Value(0)).current;
   const screenWidth = Dimensions.get('window').width;
+  const flatListRef = useRef<FlatList>(null);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -168,6 +169,8 @@ export const SylAiScreen: React.FC = () => {
       setConversationId(result.conversationUuid);
       setMessages((prev) => [...prev, { role: 'assistant', content: result.fullText }]);
       setStreamingText('');
+      // Refresh classes and events in case AI created or updated them
+      await refreshClasses();
     } catch (error) {
       Alert.alert('Syl is feeling shy', (error as Error).message);
       setStreamingText('');
@@ -200,6 +203,15 @@ export const SylAiScreen: React.FC = () => {
     ? [...messages, { role: 'assistant', content: streamingText }]
     : messages;
 
+  // Auto-scroll to bottom when new messages arrive
+  React.useEffect(() => {
+    if (data.length > 0) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  }, [data.length]);
+
   return (
     <Animated.View
       style={{ flex: 1, transform: [{ translateX: slideX }] }}
@@ -217,13 +229,15 @@ export const SylAiScreen: React.FC = () => {
         onAddClass={() => setShowNewClassModal(true)}
         onEditClass={handleEditClass}
         onDeleteClass={handleDeleteClass}
+        onOpen={refreshClasses}
       />
 
       <FlatList
+        ref={flatListRef}
         data={data}
         keyExtractor={(_, index) => String(index)}
         renderItem={renderMessage}
-        contentContainerStyle={styles.chatContent}
+        contentContainerStyle={[styles.chatContent, data.length > 0 && styles.chatContentWithMessages]}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Feather name="message-circle" size={64} color={palette.plum} style={styles.emptyIcon} />
@@ -258,18 +272,20 @@ export const SylAiScreen: React.FC = () => {
           multiline
           maxLength={500}
         />
-        <TouchableOpacity
-          style={[styles.sendButton, (!input.trim() || isStreaming) && styles.sendButtonDisabled]}
-          onPress={handleSend}
-          disabled={!input.trim() || isStreaming}
-          activeOpacity={0.7}
-        >
-          {isStreaming ? (
-            <Feather name="loader" size={20} color={palette.white} />
-          ) : (
-            <Feather name="send" size={20} color={palette.white} />
-          )}
-        </TouchableOpacity>
+        {(input.trim() || isStreaming) && (
+          <TouchableOpacity
+            style={styles.sendButton}
+            onPress={handleSend}
+            disabled={!input.trim() || isStreaming}
+            activeOpacity={0.7}
+          >
+            {isStreaming ? (
+              <Feather name="loader" size={18} color={palette.white} />
+            ) : (
+              <Feather name="send" size={18} color={palette.white} />
+            )}
+          </TouchableOpacity>
+        )}
       </View>
       </KeyboardAvoidingView>
     </Animated.View>
@@ -287,6 +303,11 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     gap: spacing.sm,
     justifyContent: 'center',
+  },
+  chatContentWithMessages: {
+    justifyContent: 'flex-start',
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
   },
   emptyState: {
     alignItems: 'center',
@@ -367,34 +388,30 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: palette.border,
     paddingLeft: spacing.md,
-    paddingRight: spacing.xs,
+    paddingRight: spacing.sm,
     paddingVertical: spacing.xs,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.lg,
   },
   input: {
     flex: 1,
-    minHeight: 40,
     maxHeight: 120,
     color: palette.text,
-    fontSize: 15,
-    paddingVertical: spacing.xs,
+    fontSize: 16,
+    paddingVertical: spacing.sm,
+    paddingRight: spacing.sm,
   },
   sendButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: palette.plum,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: spacing.xs,
+    marginLeft: spacing.sm,
     shadowColor: '#A482C4',
     shadowOpacity: 0.3,
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 6,
     elevation: 2,
-  },
-  sendButtonDisabled: {
-    backgroundColor: palette.muted,
-    opacity: 0.5,
   },
 });
