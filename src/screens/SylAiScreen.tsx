@@ -1,8 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
+  Dimensions,
+  Easing,
   FlatList,
   KeyboardAvoidingView,
+  PanResponder,
   Platform,
   StyleSheet,
   Text,
@@ -11,15 +15,21 @@ import {
   View,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
 import { streamChatMessage, renameClass, deleteClass } from '../api';
 import { useAppContext } from '../context/AppContext';
 import { ClassHeader } from '../components/ClassHeader';
 import { CuteButton } from '../components/CuteButton';
 import type { ChatMessageItem } from '../types';
+import type { MainTabParamList } from '../navigation/types';
 import { palette, radius, spacing, typography } from '../theme';
 
+type MainTabNav = BottomTabNavigationProp<MainTabParamList>;
+
 export const SylAiScreen: React.FC = () => {
+  const navigation = useNavigation<MainTabNav>();
   const { token, classes, selectedClassId, selectClass, refreshClasses } = useAppContext();
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
@@ -31,6 +41,52 @@ export const SylAiScreen: React.FC = () => {
   const [editingClassId, setEditingClassId] = useState<number | null>(null);
   const [editingClassName, setEditingClassName] = useState('');
   const [savingClass, setSavingClass] = useState(false);
+  const slideX = useRef(new Animated.Value(0)).current;
+  const screenWidth = Dimensions.get('window').width;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        const { dx, dy } = gestureState;
+        return Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const maxOffset = screenWidth * 0.3;
+        const clampedDx = Math.max(-maxOffset, Math.min(maxOffset, gestureState.dx));
+        slideX.setValue(clampedDx);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const { dx } = gestureState;
+        const threshold = screenWidth * 0.15;
+        if (dx > threshold) {
+          Animated.timing(slideX, {
+            toValue: screenWidth,
+            duration: 260,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }).start(() => {
+            slideX.setValue(0);
+            navigation.navigate('Syllabus');
+          });
+        } else if (dx < -threshold) {
+          Animated.timing(slideX, {
+            toValue: -screenWidth,
+            duration: 260,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }).start(() => {
+            slideX.setValue(0);
+            navigation.navigate('Calendar');
+          });
+        } else {
+          Animated.spring(slideX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    }),
+  ).current;
 
   const handleEditClass = (classId: number) => {
     const cls = classes.find((c) => c.id === classId);
@@ -145,11 +201,15 @@ export const SylAiScreen: React.FC = () => {
     : messages;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
+    <Animated.View
+      style={{ flex: 1, transform: [{ translateX: slideX }] }}
+      {...panResponder.panHandlers}
     >
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={90}
+      >
       <ClassHeader
         classes={classes}
         selectedId={selectedClassId}
@@ -211,7 +271,8 @@ export const SylAiScreen: React.FC = () => {
           )}
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </Animated.View>
   );
 };
 
@@ -319,9 +380,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: palette.plum,
     alignItems: 'center',
     justifyContent: 'center',
@@ -329,8 +390,8 @@ const styles = StyleSheet.create({
     shadowColor: '#A482C4',
     shadowOpacity: 0.3,
     shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 8,
-    elevation: 3,
+    shadowRadius: 6,
+    elevation: 2,
   },
   sendButtonDisabled: {
     backgroundColor: palette.muted,

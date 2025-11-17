@@ -1,7 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
+  Dimensions,
+  Easing,
   Modal,
+  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,6 +15,8 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import dayjs from 'dayjs';
+import { useNavigation } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
 import { createEvent, listEvents, renameClass, deleteClass } from '../api';
 import type { EventItem } from '../types';
@@ -18,9 +24,12 @@ import { useAppContext } from '../context/AppContext';
 import { ClassHeader } from '../components/ClassHeader';
 import { CuteButton } from '../components/CuteButton';
 import { CuteTextField } from '../components/CuteTextField';
+import type { MainTabParamList } from '../navigation/types';
 import { palette, radius, spacing, typography } from '../theme';
 
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+type MainTabNav = BottomTabNavigationProp<MainTabParamList>;
 
 interface DayCell {
   date: dayjs.Dayjs;
@@ -30,6 +39,7 @@ interface DayCell {
 type CalendarViewMode = 'calendar' | 'list';
 
 export const CalendarScreen: React.FC = () => {
+  const navigation = useNavigation<MainTabNav>();
   const { token, classes, selectedClassId, selectClass, refreshClasses } = useAppContext();
   const [showNewClassModal, setShowNewClassModal] = useState(false);
   const [newClassName, setNewClassName] = useState('');
@@ -41,12 +51,52 @@ export const CalendarScreen: React.FC = () => {
   const [currentMonth, setCurrentMonth] = useState(() => dayjs().startOf('month'));
   const [selectedDate, setSelectedDate] = useState(() => dayjs().format('YYYY-MM-DD'));
   const [viewMode, setViewMode] = useState<CalendarViewMode>('calendar');
+  const [visibleMonths, setVisibleMonths] = useState<dayjs.Dayjs[]>([]);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const monthHeights = useRef<number[]>([]);
+  const isScrolling = useRef(false);
   const [showModal, setShowModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDate, setNewDate] = useState(() => dayjs().format('YYYY-MM-DD'));
   const [newTime, setNewTime] = useState('09:00');
   const [newDescription, setNewDescription] = useState('');
   const [saving, setSaving] = useState(false);
+  const slideX = useRef(new Animated.Value(0)).current;
+  const screenWidth = Dimensions.get('window').width;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        const { dx, dy } = gestureState;
+        return Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const maxOffset = screenWidth * 0.3;
+        const clampedDx = Math.max(-maxOffset, Math.min(maxOffset, gestureState.dx));
+        slideX.setValue(clampedDx);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const { dx } = gestureState;
+        const threshold = screenWidth * 0.15;
+        if (dx > threshold) {
+          Animated.timing(slideX, {
+            toValue: screenWidth,
+            duration: 260,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }).start(() => {
+            slideX.setValue(0);
+            navigation.navigate('SylAI');
+          });
+        } else {
+          Animated.spring(slideX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    }),
+  ).current;
 
   const loadEvents = async () => {
     if (!token) return;
@@ -62,12 +112,14 @@ export const CalendarScreen: React.FC = () => {
     loadEvents();
   }, [token]);
 
+  // Initialize visible months (6 months before and after current)
   useEffect(() => {
-    const selected = dayjs(selectedDate);
-    if (!selected.isSame(currentMonth, 'month')) {
-      setSelectedDate(currentMonth.format('YYYY-MM-DD'));
+    const months: dayjs.Dayjs[] = [];
+    for (let i = -6; i <= 6; i++) {
+      months.push(dayjs().startOf('month').add(i, 'month'));
     }
-  }, [currentMonth, selectedDate]);
+    setVisibleMonths(months);
+  }, []);
 
   const eventsByDate = useMemo(() => {
     const map: Record<string, EventItem[]> = {};
@@ -81,27 +133,91 @@ export const CalendarScreen: React.FC = () => {
     return map;
   }, [events]);
 
-  const monthDays = useMemo<DayCell[]>(() => {
-    const start = currentMonth.startOf('month');
+  const getMonthDays = (month: dayjs.Dayjs): DayCell[] => {
+    const start = month.startOf('month');
     const days: DayCell[] = [];
     const leading = start.day();
-    for (let i = leading; i > 0; i--) {
-      days.push({ date: start.subtract(i, 'day'), inMonth: false });
+    
+    // Add empty cells for days before the month starts
+    for (let i = 0; i < leading; i++) {
+      days.push({ date: start, inMonth: false }); // placeholder
     }
-    for (let i = 0; i < currentMonth.daysInMonth(); i++) {
+    
+    // Add all days in the month
+    for (let i = 0; i < month.daysInMonth(); i++) {
       days.push({ date: start.add(i, 'day'), inMonth: true });
     }
-    while (days.length < 42) {
-      const last = days[days.length - 1]?.date ?? start;
-      days.push({ date: last.add(1, 'day'), inMonth: false });
+    
+    // Add empty cells to complete the last week
+    const remaining = 7 - (days.length % 7);
+    if (remaining < 7) {
+      for (let i = 0; i < remaining; i++) {
+        days.push({ date: start, inMonth: false }); // placeholder
+      }
     }
+    
     return days;
-  }, [currentMonth]);
+  };
 
-  const selectedEvents = useMemo(() => {
-    const data = eventsByDate[selectedDate] || [];
-    return [...data].sort((a, b) => dayjs(a.due).valueOf() - dayjs(b.due).valueOf());
-  }, [eventsByDate, selectedDate]);
+  const handleScroll = (event: any) => {
+    if (isScrolling.current) return;
+    
+    const scrollY = event.nativeEvent.contentOffset.y;
+    let accumulatedHeight = 0;
+    
+    for (let i = 0; i < visibleMonths.length; i++) {
+      const monthHeight = monthHeights.current[i] || 0;
+      if (scrollY >= accumulatedHeight && scrollY < accumulatedHeight + monthHeight / 2) {
+        const newMonth = visibleMonths[i];
+        if (!newMonth.isSame(currentMonth, 'month')) {
+          setCurrentMonth(newMonth);
+        }
+        break;
+      }
+      accumulatedHeight += monthHeight;
+    }
+  };
+
+  const loadMoreMonths = (direction: 'top' | 'bottom') => {
+    setVisibleMonths((prev) => {
+      if (direction === 'top') {
+        const firstMonth = prev[0];
+        const newMonths = [];
+        for (let i = 3; i > 0; i--) {
+          newMonths.push(firstMonth.subtract(i, 'month'));
+        }
+        return [...newMonths, ...prev];
+      } else {
+        const lastMonth = prev[prev.length - 1];
+        const newMonths = [];
+        for (let i = 1; i <= 3; i++) {
+          newMonths.push(lastMonth.add(i, 'month'));
+        }
+        return [...prev, ...newMonths];
+      }
+    });
+  };
+
+  const handleScrollBeginDrag = () => {
+    isScrolling.current = true;
+  };
+
+  const handleScrollEndDrag = () => {
+    isScrolling.current = false;
+  };
+
+  const handleMomentumScrollEnd = (event: any) => {
+    const scrollY = event.nativeEvent.contentOffset.y;
+    const contentHeight = event.nativeEvent.contentSize.height;
+    const layoutHeight = event.nativeEvent.layoutMeasurement.height;
+
+    // Load more months when near the edges
+    if (scrollY < 500) {
+      loadMoreMonths('top');
+    } else if (scrollY > contentHeight - layoutHeight - 500) {
+      loadMoreMonths('bottom');
+    }
+  };
 
   const sortedEvents = useMemo(
     () =>
@@ -146,17 +262,12 @@ export const CalendarScreen: React.FC = () => {
     }
   };
 
-  const goToMonth = (direction: 'prev' | 'next') => {
-    setCurrentMonth((prev) =>
-      direction === 'next' ? prev.add(1, 'month') : prev.subtract(1, 'month'),
-    );
-  };
 
-  const handleSelectDay = (cell: DayCell) => {
-    setSelectedDate(cell.date.format('YYYY-MM-DD'));
-    if (!cell.inMonth) {
-      setCurrentMonth(cell.date.startOf('month'));
-    }
+  const handleSelectDay = (date: string) => {
+    setSelectedDate(date);
+    // Navigate to a detailed day view (you can implement this later)
+    // For now, just open the modal to add an event
+    openModal(date);
   };
 
   const handleEditClass = (classId: number) => {
@@ -219,7 +330,10 @@ export const CalendarScreen: React.FC = () => {
   };
 
   return (
-    <View style={styles.container}>
+    <Animated.View
+      style={[styles.container, { transform: [{ translateX: slideX }] }]}
+      {...panResponder.panHandlers}
+    >
       <ClassHeader
         classes={classes}
         selectedId={selectedClassId}
@@ -252,21 +366,13 @@ export const CalendarScreen: React.FC = () => {
       {viewMode === 'calendar' ? (
         <>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.iconButton} onPress={() => goToMonth('prev')}>
-              <Feather name="chevron-left" size={20} color={palette.plum} />
-            </TouchableOpacity>
             <View style={styles.monthInfo}>
               <Text style={styles.monthLabel}>{currentMonth.format('MMMM YYYY')}</Text>
-              <Text style={styles.monthHint}>Tap a date to see cozy plans.</Text>
+              <Text style={styles.monthHint}>Scroll to browse months.</Text>
             </View>
-            <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.addButton} onPress={() => openModal()}>
-                <Feather name="plus" size={20} color={palette.white} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconButton} onPress={() => goToMonth('next')}>
-                <Feather name="chevron-right" size={20} color={palette.plum} />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={styles.addButton} onPress={() => openModal()}>
+              <Feather name="plus" size={20} color={palette.white} />
+            </TouchableOpacity>
           </View>
 
           <View style={styles.weekRow}>
@@ -277,73 +383,94 @@ export const CalendarScreen: React.FC = () => {
             ))}
           </View>
 
-          <View style={styles.calendarGrid}>
-            {monthDays.map((cell) => {
-              const iso = cell.date.format('YYYY-MM-DD');
-              const isSelected = selectedDate === iso;
-              const hasEvents = Boolean(eventsByDate[iso]?.length);
-              const isToday = dayjs().isSame(cell.date, 'day');
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.calendarScrollView}
+            showsVerticalScrollIndicator={false}
+            onScroll={handleScroll}
+            onScrollBeginDrag={handleScrollBeginDrag}
+            onScrollEndDrag={handleScrollEndDrag}
+            onMomentumScrollEnd={handleMomentumScrollEnd}
+            scrollEventThrottle={16}
+          >
+            {visibleMonths.map((month, monthIndex) => {
+              const monthDays = getMonthDays(month);
+              const weeks: DayCell[][] = [];
+              for (let i = 0; i < monthDays.length; i += 7) {
+                weeks.push(monthDays.slice(i, i + 7));
+              }
+              
+              // Check if this is the first week that contains days from this month
+              const firstWeekWithMonthDays = weeks.findIndex(week => 
+                week.some(cell => cell.inMonth)
+              );
+              
               return (
-                <TouchableOpacity
-                  key={iso}
-                  style={[
-                    styles.dayCell,
-                    !cell.inMonth && styles.dimmedDay,
-                    isSelected && styles.selectedCell,
-                  ]}
-                  onPress={() => handleSelectDay(cell)}
-                  activeOpacity={0.8}
+                <View
+                  key={month.format('YYYY-MM')}
+                  style={styles.monthContainer}
+                  onLayout={(event) => {
+                    monthHeights.current[monthIndex] = event.nativeEvent.layout.height;
+                  }}
                 >
-                  <Text
-                    style={[
-                      styles.dayNumber,
-                      !cell.inMonth && styles.dimmedText,
-                      isToday && styles.todayText,
-                      isSelected && styles.selectedText,
-                    ]}
-                  >
-                    {cell.date.date()}
-                  </Text>
-                  {hasEvents ? <View style={styles.eventDot} /> : null}
-                </TouchableOpacity>
+                  {weeks.map((week, weekIndex) => {
+                    const hasMonthDays = week.some(cell => cell.inMonth);
+                    const isFirstWeekOfMonth = weekIndex === firstWeekWithMonthDays;
+                    
+                    return (
+                      <View key={weekIndex}>
+                        {isFirstWeekOfMonth && (
+                          <Text style={styles.monthSectionLabel}>{month.format('MMMM')}</Text>
+                        )}
+                        <View style={styles.weekRowContainer}>
+                          {week.map((cell, cellIndex) => {
+                            if (!cell.inMonth) {
+                              // Empty cell for days outside the month
+                              return (
+                                <View key={`empty-${weekIndex}-${cellIndex}`} style={styles.dayCell} />
+                              );
+                            }
+                            
+                            const iso = cell.date.format('YYYY-MM-DD');
+                            const isSelected = selectedDate === iso;
+                            const dayEvents = eventsByDate[iso] || [];
+                            const isToday = dayjs().isSame(cell.date, 'day');
+                            
+                            return (
+                              <TouchableOpacity
+                                key={iso}
+                                style={styles.dayCell}
+                                onPress={() => handleSelectDay(iso)}
+                                activeOpacity={0.8}
+                              >
+                                <Text
+                                  style={[
+                                    styles.dayNumber,
+                                    isToday && styles.todayText,
+                                    isSelected && styles.selectedText,
+                                  ]}
+                                >
+                                  {cell.date.date()}
+                                </Text>
+                                {dayEvents.slice(0, 3).map((event) => (
+                                  <View key={event.id} style={styles.eventPreview}>
+                                    <Text style={styles.eventPreviewText} numberOfLines={1}>
+                                      {event.title}
+                                    </Text>
+                                  </View>
+                                ))}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                        <View style={styles.weekSeparator} />
+                      </View>
+                    );
+                  })}
+                </View>
               );
             })}
-          </View>
-
-          <View style={styles.eventsCard}>
-            <View style={styles.eventsHeader}>
-              <View>
-                <Text style={styles.eventsTitle}>{dayjs(selectedDate).format('MMMM D')}</Text>
-                <Text style={styles.eventsSubtitle}>
-                  {selectedEvents.length ? 'Here is your agenda.' : 'Nothing planned. 🌤️'}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={() => openModal(selectedDate)}>
-                <Feather name="plus-circle" size={26} color={palette.plum} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView
-              contentContainerStyle={styles.eventsList}
-              showsVerticalScrollIndicator={false}
-            >
-              {selectedEvents.length === 0 ? (
-                <Text style={styles.empty}>Take a breather – no events.</Text>
-              ) : (
-                selectedEvents.map((event) => (
-                  <View key={event.id} style={styles.eventCard}>
-                    <Text style={styles.eventTitle}>{event.title}</Text>
-                    <Text style={styles.eventDate}>{dayjs(event.due).format('h:mm A')}</Text>
-                    {event.class_name ? (
-                      <Text style={styles.eventClass}>{event.class_name}</Text>
-                    ) : null}
-                    {event.description ? (
-                      <Text style={styles.eventDescription}>{event.description}</Text>
-                    ) : null}
-                  </View>
-                ))
-              )}
-            </ScrollView>
-          </View>
+          </ScrollView>
         </>
       ) : (
         <View style={styles.listWrapper}>
@@ -426,7 +553,7 @@ export const CalendarScreen: React.FC = () => {
           </View>
         </Modal>
       ) : null}
-    </View>
+    </Animated.View>
   );
 };
 
@@ -469,16 +596,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing.sm,
   },
-  iconButton: {
-    backgroundColor: palette.white,
-    padding: spacing.sm,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: palette.border,
-  },
   monthInfo: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   monthLabel: {
     fontSize: 20,
@@ -489,11 +609,6 @@ const styles = StyleSheet.create({
     color: palette.muted,
     fontSize: 13,
   },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
   addButton: {
     backgroundColor: palette.plum,
     padding: spacing.sm,
@@ -503,6 +618,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  calendarScrollView: {
+    flex: 1,
+    backgroundColor: palette.white,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  monthContainer: {
+    paddingTop: spacing.sm,
+  },
+  monthSectionLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: palette.text,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  weekRowContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: spacing.xs,
+  },
+  weekSeparator: {
+    height: 1,
+    backgroundColor: palette.border,
+    marginHorizontal: spacing.xs,
   },
   weekLabel: {
     width: `${100 / 7}%`,
@@ -510,35 +652,19 @@ const styles = StyleSheet.create({
     color: palette.muted,
     fontWeight: '600',
   },
-  calendarGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    borderRadius: radius.lg,
-    backgroundColor: palette.white,
-    borderWidth: 1,
-    borderColor: palette.border,
-  },
   dayCell: {
     width: `${100 / 7}%`,
-    aspectRatio: 1,
+    minHeight: 70,
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.xs,
-    borderRadius: radius.md,
-  },
-  dimmedDay: {
-    opacity: 0.45,
+    justifyContent: 'flex-start',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: 4,
+    gap: 2,
   },
   dayNumber: {
     fontSize: 16,
     color: palette.text,
     fontWeight: '600',
-  },
-  dimmedText: {
-    color: palette.muted,
-  },
-  selectedCell: {
-    backgroundColor: palette.lavender,
   },
   selectedText: {
     color: palette.plum,
@@ -546,26 +672,17 @@ const styles = StyleSheet.create({
   todayText: {
     textDecorationLine: 'underline',
   },
-  eventDot: {
-    width: 6,
-    height: 6,
+  eventPreview: {
+    width: '100%',
     backgroundColor: palette.coral,
     borderRadius: 3,
-    marginTop: spacing.xs / 2,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
   },
-  eventsCard: {
-    flex: 1,
-    backgroundColor: palette.white,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: palette.border,
-  },
-  eventsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
+  eventPreviewText: {
+    fontSize: 9,
+    color: palette.white,
+    fontWeight: '600',
   },
   eventsTitle: {
     fontSize: 20,
@@ -574,15 +691,6 @@ const styles = StyleSheet.create({
   },
   eventsSubtitle: {
     color: palette.muted,
-  },
-  eventsList: {
-    gap: spacing.sm,
-    paddingBottom: spacing.xl,
-  },
-  eventCard: {
-    backgroundColor: palette.sky,
-    padding: spacing.md,
-    borderRadius: radius.md,
   },
   eventTitle: {
     fontSize: 16,

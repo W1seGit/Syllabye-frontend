@@ -3,7 +3,10 @@ import {
   ActionSheetIOS,
   Alert,
   Animated,
+  Dimensions,
+  Easing,
   Modal,
+  PanResponder,
   Platform,
   RefreshControl,
   ScrollView,
@@ -28,6 +31,9 @@ import {
   deleteSyllabusImage,
   listEvents,
 } from '../api';
+import { useNavigation } from '@react-navigation/native';
+import type { MainTabParamList } from '../navigation/types';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { EventItem } from '../types';
 import { useAppContext } from '../context/AppContext';
 import { ClassHeader } from '../components/ClassHeader';
@@ -37,7 +43,10 @@ import { CuteTextField } from '../components/CuteTextField';
 import { SyllabusPreview } from '../components/SyllabusPreview';
 import { palette, radius, spacing, typography } from '../theme';
 
+type MainTabNav = BottomTabNavigationProp<MainTabParamList>;
+
 export const SyllabusScreen: React.FC = () => {
+  const navigation = useNavigation<MainTabNav>();
   const {
     token,
     classes,
@@ -68,6 +77,42 @@ export const SyllabusScreen: React.FC = () => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
   const iconRotate = useRef(new Animated.Value(0)).current;
+  const slideX = useRef(new Animated.Value(0)).current;
+  const screenWidth = Dimensions.get('window').width;
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        const { dx, dy } = gestureState;
+        return Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const maxOffset = screenWidth * 0.3;
+        const clampedDx = Math.max(-maxOffset, Math.min(maxOffset, gestureState.dx));
+        slideX.setValue(clampedDx);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const { dx } = gestureState;
+        const threshold = screenWidth * 0.15;
+        if (dx < -threshold) {
+          Animated.timing(slideX, {
+            toValue: -screenWidth,
+            duration: 260,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }).start(() => {
+            slideX.setValue(0);
+            navigation.navigate('SylAI');
+          });
+        } else {
+          Animated.spring(slideX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    }),
+  ).current;
 
   const currentClass = useMemo(
     () => classes.find((cls) => cls.id === selectedClassId),
@@ -150,7 +195,7 @@ export const SyllabusScreen: React.FC = () => {
         const filtered = all.filter(
           (event) =>
             event.class_name === currentClass.name &&
-            event.source === 'syllabus' &&
+            event.source === 'syllabus_ai' &&
             event.syllabus_id === syllabus.id,
         );
         setSyllabusEvents(filtered);
@@ -200,7 +245,7 @@ export const SyllabusScreen: React.FC = () => {
     try {
       const allEvents = await listEvents(token);
       const syllabusEvents = allEvents.filter(
-        (event) => event.source === 'syllabus' && event.syllabus_id === syllabus.id
+        (event) => event.source === 'syllabus_ai' && event.syllabus_id === syllabus.id
       );
       if (syllabusEvents.length > 0) {
         setFoundTasks(syllabusEvents);
@@ -496,7 +541,10 @@ export const SyllabusScreen: React.FC = () => {
   }
 
   return (
-    <>
+    <Animated.View
+      style={{ flex: 1, transform: [{ translateX: slideX }] }}
+      {...panResponder.panHandlers}
+    >
       <ScrollView
         contentContainerStyle={styles.container}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -789,7 +837,7 @@ export const SyllabusScreen: React.FC = () => {
           </View>
         </Modal>
       ) : null}
-    </>
+    </Animated.View>
   );
 };
 
