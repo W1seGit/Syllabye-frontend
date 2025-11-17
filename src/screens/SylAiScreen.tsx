@@ -30,7 +30,7 @@ type MainTabNav = BottomTabNavigationProp<MainTabParamList>;
 
 export const SylAiScreen: React.FC = () => {
   const navigation = useNavigation<MainTabNav>();
-  const { token, classes, selectedClassId, selectClass, refreshClasses } = useAppContext();
+  const { token, classes, selectedClassId, selectClass, refreshClasses, logout } = useAppContext();
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [streamingText, setStreamingText] = useState('');
@@ -104,6 +104,14 @@ export const SylAiScreen: React.FC = () => {
       setEditingClassId(classId);
       setEditingClassName(cls.name);
       setShowEditClassModal(true);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      // ignore
     }
   };
 
@@ -321,15 +329,27 @@ export const SylAiScreen: React.FC = () => {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={90}
       >
-      <ClassHeader
-        classes={classes}
-        selectedId={selectedClassId}
-        onSelect={(id) => selectClass(id)}
-        onAddClass={() => setShowNewClassModal(true)}
-        onEditClass={handleEditClass}
-        onDeleteClass={handleDeleteClass}
-        onOpen={refreshClasses}
-      />
+      <View style={styles.topBar}>
+        <View style={{ flex: 1 }}>
+          <ClassHeader
+            classes={classes}
+            selectedId={selectedClassId}
+            onSelect={(id) => selectClass(id)}
+            onAddClass={() => setShowNewClassModal(true)}
+            onEditClass={handleEditClass}
+            onDeleteClass={handleDeleteClass}
+            onOpen={refreshClasses}
+          />
+        </View>
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={handleLogout}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          activeOpacity={0.7}
+        >
+          <Feather name="log-out" size={16} color={palette.white} />
+        </TouchableOpacity>
+      </View>
 
       {toolEvents.length > 0 && (
         <View style={styles.toolsContainer}>
@@ -575,5 +595,24 @@ const styles = StyleSheet.create({
   toolSummary: {
     fontSize: 12,
     color: palette.text,
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  logoutButton: {
+    marginLeft: spacing.sm,
+    marginTop: spacing.xs,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: palette.plum,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#A482C4',
+    shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 2,
   },
 });
