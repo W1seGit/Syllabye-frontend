@@ -1,5 +1,14 @@
 import React from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import {
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableWithoutFeedback,
+  View,
+} from 'react-native';
 
 import { palette, radius, spacing } from '../theme';
 
@@ -18,17 +27,28 @@ export const CuteModal: React.FC<Props> = ({ visible, onClose, title, children }
       animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={styles.backdrop}>
-        <View style={styles.content}>
-          <Text style={styles.title}>{title}</Text>
-          {children}
-        </View>
-      </View>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={64}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.backdrop}>
+            <View style={styles.content}>
+              <Text style={styles.title}>{title}</Text>
+              {children}
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.3)',
