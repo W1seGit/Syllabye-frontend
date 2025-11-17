@@ -34,20 +34,20 @@ const MainTabs = () => (
       tabBarLabelStyle: styles.tabLabel,
       tabBarIcon: ({ focused, color }) => {
         if (route.name === 'Syllabus') {
-          return <Feather name="book-open" size={22} color={color} />;
+          return <Feather name="book-open" size={24} color={color} />;
         }
         if (route.name === 'SylAI') {
           return (
-            <View style={[styles.chatIcon, focused && styles.chatIconActive]}>
+            <View style={[styles.chatBubble, focused && styles.chatBubbleActive]}>
               <Feather
-                name="message-circle"
-                size={20}
+                name="message-square"
+                size={24}
                 color={focused ? palette.white : palette.plum}
               />
             </View>
           );
         }
-        return <Feather name="calendar" size={22} color={color} />;
+        return <Feather name="calendar" size={24} color={color} />;
       },
     })}
   >
@@ -108,25 +108,37 @@ const styles = StyleSheet.create({
   tabBar: {
     backgroundColor: palette.white,
     borderTopWidth: 0,
-    elevation: 5,
-    shadowColor: '#DEC0F1',
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: -4 },
-    shadowRadius: 14,
-    height: 70,
-    paddingBottom: 10,
-    paddingTop: 10,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: -2 },
+    shadowRadius: 12,
+    height: 75,
+    paddingBottom: 12,
+    paddingTop: 8,
   },
   tabLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
+    marginTop: 4,
   },
-  chatIcon: {
-    padding: 10,
-    borderRadius: 18,
-    backgroundColor: '#FBE4FF',
+  chatBubble: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: palette.lavender,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -20,
+    borderWidth: 4,
+    borderColor: palette.white,
+    shadowColor: palette.plum,
+    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
+    elevation: 8,
   },
-  chatIconActive: {
+  chatBubbleActive: {
     backgroundColor: palette.plum,
   },
 });

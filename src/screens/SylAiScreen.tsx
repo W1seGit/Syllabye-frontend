@@ -120,6 +120,17 @@ export const SylAiScreen: React.FC = () => {
     }
   };
 
+  const presetPrompts = [
+    "What assignments are due this week?",
+    "Summarize today's readings",
+    "When is my next exam?",
+    "What should I focus on studying?",
+  ];
+
+  const handlePresetPrompt = (prompt: string) => {
+    setInput(prompt);
+  };
+
   const renderMessage = ({ item }: { item: ChatMessageItem }) => {
     const isUser = item.role === 'user';
     return (
@@ -154,9 +165,26 @@ export const SylAiScreen: React.FC = () => {
         renderItem={renderMessage}
         contentContainerStyle={styles.chatContent}
         ListEmptyComponent={
-          <Text style={styles.placeholder}>
-            Ask Syl about due dates, readings, or anything on your mind ✨
-          </Text>
+          <View style={styles.emptyState}>
+            <Feather name="message-circle" size={64} color={palette.plum} style={styles.emptyIcon} />
+            <Text style={styles.emptyTitle}>Chat with Syl AI</Text>
+            <Text style={styles.emptySubtitle}>
+              Ask me about due dates, readings, or anything on your mind
+            </Text>
+            <View style={styles.presetPrompts}>
+              {presetPrompts.map((prompt, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.presetPrompt}
+                  onPress={() => handlePresetPrompt(prompt)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.presetPromptText}>{prompt}</Text>
+                  <Feather name="arrow-right" size={16} color={palette.plum} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
         }
       />
 
@@ -191,12 +219,56 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: spacing.lg,
+    paddingBottom: spacing.md,
     backgroundColor: palette.cream,
   },
   chatContent: {
     flexGrow: 1,
     gap: spacing.sm,
-    paddingBottom: spacing.md,
+    justifyContent: 'center',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingHorizontal: spacing.xl,
+    gap: spacing.md,
+  },
+  emptyIcon: {
+    marginBottom: spacing.sm,
+    opacity: 0.8,
+  },
+  emptyTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: palette.plum,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    fontSize: 15,
+    color: palette.muted,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: spacing.md,
+  },
+  presetPrompts: {
+    width: '100%',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  presetPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: palette.white,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  presetPromptText: {
+    fontSize: 15,
+    color: palette.text,
+    fontWeight: '500',
+    flex: 1,
   },
   placeholder: {
     textAlign: 'center',
@@ -228,38 +300,37 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: spacing.sm,
-    paddingTop: spacing.md,
+    alignItems: 'center',
+    backgroundColor: palette.white,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: palette.border,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.xs,
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.sm,
   },
   input: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: palette.border,
-    borderRadius: radius.lg,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    paddingRight: spacing.md,
-    minHeight: 44,
+    minHeight: 40,
     maxHeight: 120,
     color: palette.text,
-    backgroundColor: palette.white,
     fontSize: 15,
+    paddingVertical: spacing.xs,
   },
   sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.pill,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: palette.plum,
     alignItems: 'center',
     justifyContent: 'center',
-    ...{
-      shadowColor: '#A482C4',
-      shadowOpacity: 0.3,
-      shadowOffset: { width: 0, height: 2 },
-      shadowRadius: 8,
-      elevation: 3,
-    },
+    marginLeft: spacing.xs,
+    shadowColor: '#A482C4',
+    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 8,
+    elevation: 3,
   },
   sendButtonDisabled: {
     backgroundColor: palette.muted,
