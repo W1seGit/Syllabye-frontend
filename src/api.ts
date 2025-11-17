@@ -295,3 +295,76 @@ export async function streamChatMessage({
     conversationUuid: headerConversation || conversationUuid || null,
   };
 }
+
+export async function streamChatMessageWs({
+  token,
+  message,
+  conversationUuid,
+  onChunk,
+}: StreamChatOptions): Promise<ChatStreamResult> {
+  const wsBase = API_BASE_URL.replace(/^http/, 'ws');
+  const url = `${wsBase}/chat/ws?token=${encodeURIComponent(token)}${
+    conversationUuid ? `&conversation_uuid=${encodeURIComponent(conversationUuid)}` : ''
+  }`;
+
+  return new Promise<ChatStreamResult>((resolve, reject) => {
+    let full = '';
+    let convUuid: string | null = conversationUuid || null;
+
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+    } catch (err) {
+      reject(err);
+      return;
+    }
+
+    ws.onopen = () => {
+      ws.send(
+        JSON.stringify({
+          message,
+          conversation_uuid: conversationUuid || null,
+        }),
+      );
+    };
+
+    ws.onmessage = (event) => {
+      const data = event.data;
+      if (!data) {
+        return;
+      }
+      if (typeof data === 'string') {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed && parsed.type === 'meta' && typeof parsed.conversation_uuid === 'string') {
+            convUuid = parsed.conversation_uuid;
+            return;
+          }
+          if (parsed && parsed.type === 'done') {
+            ws.close();
+            return;
+          }
+        } catch {
+          full += data;
+          onChunk?.(data);
+          return;
+        }
+      }
+    };
+
+    ws.onerror = (event) => {
+      reject(new Error('WebSocket error'));
+      try {
+        ws.close();
+      } catch {
+      }
+    };
+
+    ws.onclose = () => {
+      resolve({
+        fullText: full,
+        conversationUuid: convUuid,
+      });
+    };
+  });
+}

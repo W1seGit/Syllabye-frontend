@@ -18,7 +18,7 @@ import { Feather } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
-import { streamChatMessage, renameClass, deleteClass } from '../api';
+import { streamChatMessage, streamChatMessageWs, renameClass, deleteClass } from '../api';
 import { useAppContext } from '../context/AppContext';
 import { ClassHeader } from '../components/ClassHeader';
 import { CuteButton } from '../components/CuteButton';
@@ -158,14 +158,26 @@ export const SylAiScreen: React.FC = () => {
     setStreamingText('');
     setIsStreaming(true);
     try {
-      const result = await streamChatMessage({
-        token,
-        message: text,
-        conversationUuid: conversationId,
-        onChunk: (chunk) => {
-          setStreamingText((prev) => prev + chunk);
-        },
-      });
+      let result;
+      try {
+        result = await streamChatMessageWs({
+          token,
+          message: text,
+          conversationUuid: conversationId,
+          onChunk: (chunk) => {
+            setStreamingText((prev) => prev + chunk);
+          },
+        });
+      } catch {
+        result = await streamChatMessage({
+          token,
+          message: text,
+          conversationUuid: conversationId,
+          onChunk: (chunk) => {
+            setStreamingText((prev) => prev + chunk);
+          },
+        });
+      }
       setConversationId(result.conversationUuid);
       setMessages((prev) => [...prev, { role: 'assistant', content: result.fullText }]);
       setStreamingText('');
